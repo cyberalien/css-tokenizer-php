@@ -708,5 +708,20 @@ class TokenizerTest extends \PHPUnit\Framework\TestCase
             }");
         $this->assertEquals(1, count($parser->errors));
         $this->assertEquals('Incomplete URL on line 2', $parser->errors[0]->getMessage());
+
+        // More than one double colon
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'splitRules'    => true,
+        ]);
+        $result = $parser->tokenize('.foo { color: red: blue; }');
+        $this->assertEquals(1, count($parser->errors));
+
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'splitRules'    => true,
+        ]);
+        $result = $parser->tokenize('.foo { color: url("bar"): blue; }');
+        $this->assertEquals(1, count($parser->errors));
     }
 }

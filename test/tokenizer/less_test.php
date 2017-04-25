@@ -158,6 +158,8 @@ class LessTest extends \PHPUnit\Framework\TestCase
   border-color: lighten(@base, 30%);
   div { .box-shadow(0 0 5px, 30%) }
 }
+.mixin (@a) when (@media = mobile) {
+}
 ');
         $this->assertEquals(0, count($parser->errors));
         foreach ($result as &$item) {
@@ -224,6 +226,14 @@ class LessTest extends \PHPUnit\Framework\TestCase
             [
                 'token' => '}',
             ],
+            [
+                'token' => '{',
+                'code'  => '.mixin (@a) when (@media = mobile)',
+                'selectors' => ['.mixin (@a) when (@media = mobile)'],
+            ],
+            [
+                'token' => '}',
+            ],
         ], $result);
     }
 
@@ -236,7 +246,7 @@ class LessTest extends \PHPUnit\Framework\TestCase
         $result = $parser->tokenize('
 // numbers are converted into the same units
 @conversion-1: 5cm + 10mm; // result is 6cm
-@conversion-2: 2 - 3cm - 5mm; // result is -1.5cm
+@conversion-2: ((2) - (3cm)) - 5mm; // extra braces to test nested functions
 
 // conversion is impossible
 @incompatible-units: 2 + 5px - 3cm; // result is 4px
@@ -259,7 +269,7 @@ class LessTest extends \PHPUnit\Framework\TestCase
             [
                 'token' => 'rule',
                 'key'  => '@conversion-2',
-                'value' => '2 - 3cm - 5mm',
+                'value' => '((2) - (3cm)) - 5mm',
             ],
             [
                 'token' => 'rule',
@@ -280,6 +290,322 @@ class LessTest extends \PHPUnit\Framework\TestCase
                 'token' => 'rule',
                 'key'  => '@other',
                 'value' => '@base + @filler',
+            ],
+        ], $result);
+    }
+
+    public function testCSSHack()
+    {
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'lessSyntax'    => true
+        ]);
+        $result = $parser->tokenize('
+.weird-element {
+  content: ~"^//* some horrible but needed css hack";
+}
+');
+        $this->assertEquals(0, count($parser->errors));
+        foreach ($result as &$item) {
+            unset ($item['index']);
+        }
+        $this->assertEquals([
+            [
+                'token' => '{',
+                'code'  => '.weird-element',
+                'selectors' => ['.weird-element']
+            ],
+            [
+                'token' => 'rule',
+                'key'  => 'content',
+                'value' => '~"^//* some horrible but needed css hack"',
+            ],
+            [
+                'token' => '}',
+            ],
+        ], $result);
+    }
+
+    public function testSassFunction()
+    {
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'lessSyntax'    => true
+        ]);
+        $result = $parser->tokenize('
+@function foo($test) {
+  @return \'bar\';
+}
+
+a {
+  color#{foo(\'test\')}: red;
+}
+');
+        $this->assertEquals(0, count($parser->errors));
+        foreach ($result as &$item) {
+            unset ($item['index']);
+        }
+        $this->assertEquals([
+            [
+                'token' => '{',
+                'code'  => '@function foo($test)',
+                'atRule'    => 'function',
+                'atValues' => ['foo($test)']
+            ],
+            [
+                'token' => 'code',
+                'code'  => '@return \'bar\';',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => 'a',
+                'selectors' => ['a']
+            ],
+            [
+                'token' => 'rule',
+                'key'  => 'color#{foo(\'test\')}',
+                'value' => 'red',
+            ],
+            [
+                'token' => '}',
+            ],
+        ], $result);
+    }
+
+    public function testImport()
+    {
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'lessSyntax'    => true
+        ]);
+        $result = $parser->tokenize('
+@import "library"; // library.less
+@import "typo.css";
+');
+        $this->assertEquals(0, count($parser->errors));
+        foreach ($result as &$item) {
+            unset ($item['index']);
+        }
+        $this->assertEquals([
+            [
+                'token' => 'code',
+                'code'  => '@import "library";',
+            ],
+            [
+                'token' => 'code',
+                'code'  => '@import "typo.css";',
+            ],
+        ], $result);
+    }
+
+    public function testVariableSelectors()
+    {
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'lessSyntax'    => true
+        ]);
+        $result = $parser->tokenize('
+// Variables
+@my-selector: banner;
+@property: color;
+@fnord:  "I am fnord.";
+@var:    "fnord";
+
+// Usage
+.@{my-selector} {
+  font-weight: bold;
+}
+.widget {
+  @{property}: #0ee;
+  background-@{property}: #999;
+  :after {
+    content: @@var;
+  }
+}
+');
+        $this->assertEquals(0, count($parser->errors));
+        foreach ($result as &$item) {
+            unset ($item['index']);
+        }
+        $this->assertEquals([
+            [
+                'token' => 'rule',
+                'key'  => '@my-selector',
+                'value' => 'banner',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@property',
+                'value' => 'color',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@fnord',
+                'value' => '"I am fnord."',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@var',
+                'value' => '"fnord"',
+            ],
+            [
+                'token' => '{',
+                'code'  => '.@{my-selector}',
+                'selectors' => ['.@{my-selector}']
+            ],
+
+            [
+                'token' => 'rule',
+                'key'  => 'font-weight',
+                'value' => 'bold',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => '.widget',
+                'selectors' => ['.widget']
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@{property}',
+                'value' => '#0ee',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => 'background-@{property}',
+                'value' => '#999',
+            ],
+            [
+                'token' => '{',
+                'code'  => ':after',
+                'selectors' => [':after']
+            ],
+            [
+                'token' => 'rule',
+                'key'  => 'content',
+                'value' => '@@var',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '}',
+            ],
+        ], $result);
+    }
+
+    public function testExtend()
+    {
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'lessSyntax'    => true
+        ]);
+        $result = $parser->tokenize('
+nav ul {
+  &:extend(.inline);
+  background: blue;
+}
+
+.big-division,
+.big-bag:extend(.bag),
+.big-bucket:extend(.bucket) {
+  color: red;
+}
+
+pre:hover,
+.some-class {
+  &:extend(div pre);
+}
+
+li.list > a {
+  // list styles
+}
+button.list-style {
+  &:extend(li.list > a); // use the same list styles
+}
+
+.e:extend([title="identifier"], .g) {
+}
+');
+        $this->assertEquals(0, count($parser->errors));
+        foreach ($result as &$item) {
+            unset ($item['index']);
+        }
+        $this->assertEquals([
+            [
+                'token' => '{',
+                'code'  => 'nav ul',
+                'selectors' => ['nav ul']
+            ],
+            [
+                'token' => 'code',
+                'code'  => '&:extend(.inline);',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => 'background',
+                'value' => 'blue',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => ".big-division,\n.big-bag:extend(.bag),\n.big-bucket:extend(.bucket)",
+                'selectors' => ['.big-division', '.big-bag:extend(.bag)', '.big-bucket:extend(.bucket)']
+            ],
+            [
+                'token' => 'rule',
+                'key'  => 'color',
+                'value' => 'red',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => "pre:hover,\n.some-class",
+                'selectors' => ['pre:hover', '.some-class']
+            ],
+            [
+                'token' => 'code',
+                'code' => '&:extend(div pre);',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => 'li.list > a',
+                'selectors' => ['li.list > a']
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => 'button.list-style',
+                'selectors' => ['button.list-style']
+            ],
+            [
+                'token' => 'code',
+                'code'  => '&:extend(li.list > a);',
+            ],
+            [
+                'token' => '}',
+            ],
+            [
+                'token' => '{',
+                'code'  => '.e:extend([title="identifier"], .g)',
+                'selectors' => ['.e:extend([title="identifier"], .g)']
+            ],
+            [
+                'token' => '}',
             ],
         ], $result);
     }

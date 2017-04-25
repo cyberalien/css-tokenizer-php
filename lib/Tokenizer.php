@@ -98,6 +98,7 @@ class Tokenizer
         $items = [];
         $depth = 0;
         $functionDepth = 0;
+        $expressionDepth = 0;
         $blockStart = 0;
         $selectorStart = 0;
         $error = false;
@@ -105,9 +106,7 @@ class Tokenizer
 
         $validTokens = ['"', "'", '/*', '{', '}', ';', 'url(', '\\'];
         if ($this->lessSyntax) {
-            $validTokens[] = '(';
-            $validTokens[] = ')';
-            $validTokens[] = '//';
+            $validTokens = array_merge($validTokens, ['(', ')', '//', '@{', '#{']);
         }
 
         $tokens = $this->_findTokens($validTokens);
@@ -295,6 +294,51 @@ class Tokenizer
                     break;
 
                 case '}':
+                    if ($expressionDepth > 0) {
+                        // LESS/SASS expression
+                        if ($expressionDepth === 1 && $this->splitRules) {
+                            // Find start of expression
+                            $found = false;
+                            $text = substr($this->_css, $start, $token['index'] - $start + 1);
+
+                            for ($i = count($words) - 1; $i >= 0; $i --) {
+                                if (!empty($words[$i]['beforeExpression'])) {
+                                    $found = true;
+                                    unset($words[$i]['beforeExpression']);
+                                    if ($i === count($words) - 1) {
+                                        // Previous token starts expression - do not change word tokens
+                                        $words[] = [
+                                            'type'  => 'expression',
+                                            'text'  => $text,
+                                            'index' => $start
+                                        ];
+                                    } else {
+                                        // Merge with previous tokens
+                                        $start = $words[$i + 1]['index'];
+                                        $words = array_slice($words, 0, $i + 1);
+                                        $words[] = [
+                                            'type'  => 'expression',
+                                            'text'  => $text,
+                                            'index' => $start
+                                        ];
+                                    }
+                                    break;
+                                }
+                                $text = $words[$i]['text'] . $text;
+                            }
+                            if (!$found) {
+                                $words[] = [
+                                    'type'  => 'expression',
+                                    'text'  => $text,
+                                    'index' => $start,
+                                    'error' => true
+                                ];
+                            }
+                            $start = $token['index'] + 1;
+                        }
+                        $expressionDepth --;
+                        break;
+                    }
                     // End of block
                     if ($this->splitRules) {
                         $words[] = [
@@ -338,12 +382,15 @@ class Tokenizer
                 case '(':
                     // Function with LESS syntax enabled
                     if ($this->splitRules) {
-                        $words[] = [
+                        $row = [
                             'type'  => 'text',
                             'text'  => substr($this->_css, $start, $token['index'] - $start),
                             'index' => $start,
-                            'beforeFunction'    => true
                         ];
+                        if (!$functionDepth) {
+                            $row['beforeFunction'] = true;
+                        }
+                        $words[] = $row;
                         $start = $token['index'];
                     }
                     $functionDepth ++;
@@ -351,7 +398,7 @@ class Tokenizer
 
                 case ')':
                     // End of function with LESS syntax enabled
-                    if ($functionDepth > 0 && $this->splitRules) {
+                    if ($functionDepth === 1 && $this->splitRules) {
                         // Find start of function
                         $found = false;
                         $text = substr($this->_css, $start, $token['index'] - $start + 1);
@@ -395,6 +442,24 @@ class Tokenizer
                     if ($functionDepth < 0) {
                         $functionDepth = 0;
                     }
+                    break;
+
+                case '@{':
+                case '#{':
+                    // Expression with LESS/SASS syntax enabled
+                    if ($this->splitRules) {
+                        $row = [
+                            'type'  => 'text',
+                            'text'  => substr($this->_css, $start, $token['index'] - $start + 2),
+                            'index' => $start,
+                        ];
+                        if (!$expressionDepth) {
+                            $row['beforeExpression'] = true;
+                        }
+                        $words[] = $row;
+                        $start = $token['index'] + 2;
+                    }
+                    $expressionDepth ++;
                     break;
             }
         }
@@ -679,23 +744,50 @@ class Tokenizer
         $key = '';
         $value = '';
         $isKey = true;
-        $possibleMixin = false;
+        $hasFunction = false;
 
         foreach ($words as $word) {
             if ($word['type'] !== 'text') {
                 if ($isKey) {
-                    if ($word['type'] === 'function') {
-                        $possibleMixin = true;
-                        continue;
+                    if (!$this->lessSyntax) {
+                        // Cannot have URL or quoted string in key
+                        return false;
                     }
-                    // Cannot have URL or quoted string in key
-                    return false;
+
+                    // Check for function
+                    if ($word['type'] === 'function') {
+                        $hasFunction = true;
+                    }
+                    $key .= $word['text'];
+                    continue;
                 }
                 $value .= $word['text'];
                 continue;
             }
 
             $pairs = explode(':', $word['text']);
+            if ($this->lessSyntax && count($pairs) > 1) {
+                // Check for "&:extend" LESS syntax
+                $updated = false;
+                for ($index = 1; $index < count($pairs); $index ++) {
+                    if ($pairs[$index] === 'extend' || substr($pairs[$index], 0, 7) === 'extend(') {
+                        $pairs[$index - 1] .= $pairs[$index];
+                        $pairs[$index] = null;
+                        $updated = true;
+                    }
+                }
+
+                if ($updated) {
+                    $newPairs = [];
+                    foreach ($pairs as $item) {
+                        if ($item !== null) {
+                            $newPairs[] = $item;
+                        }
+                    }
+                    $pairs = $newPairs;
+                }
+            }
+
             if (count($pairs) > 2) {
                 return false;
             }
@@ -716,7 +808,8 @@ class Tokenizer
         }
 
         if ($isKey) {
-            return $possibleMixin;
+            // True if token should be treated as code
+            return $this->lessSyntax ? $hasFunction || substr(trim($key), 0, 1) === '@' : false;
         }
 
         $key = trim($key);
