@@ -621,7 +621,7 @@ class Tokenizer
 
         if (substr($selectors[0], 0, 1) === '@') {
             $split = preg_split('/\s+/', $selectors[0]);
-            $result['atRule'] = strtolower(substr($split[0], 1));
+            $result['atRule'] = substr($split[0], 1);
             $selectors[0] = trim(substr($selectors[0], 1 + strlen($result['atRule'])));
             $result['atValues'] = $selectors;
         } else {
@@ -726,7 +726,7 @@ class Tokenizer
 
         $result = [
             'token' => 'rule',
-            'key'   => strtolower($key),
+            'key'   => $key,
             'value' => $value,
             'index' => $words[0]['index'],
         ];

@@ -93,7 +93,7 @@ class TokenizerTest extends \PHPUnit\Framework\TestCase
             ],
             [
                 'token' => 'rule',
-                'key'   => 'color',
+                'key'   => 'Color',
                 'value' => 'Red',
                 'index' => 3,
             ],
