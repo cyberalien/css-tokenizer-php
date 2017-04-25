@@ -226,4 +226,61 @@ class LessTest extends \PHPUnit\Framework\TestCase
             ],
         ], $result);
     }
+
+    public function testVariablesAndComments()
+    {
+        $parser = new Tokenizer([
+            'ignoreErrors'  => false,
+            'lessSyntax'    => true
+        ]);
+        $result = $parser->tokenize('
+// numbers are converted into the same units
+@conversion-1: 5cm + 10mm; // result is 6cm
+@conversion-2: 2 - 3cm - 5mm; // result is -1.5cm
+
+// conversion is impossible
+@incompatible-units: 2 + 5px - 3cm; // result is 4px
+
+// example with variables
+@base: 5%;
+@filler: @base * 2; // result is 10%
+@other: @base + @filler; // result is 15%
+');
+        $this->assertEquals(0, count($parser->errors));
+        foreach ($result as &$item) {
+            unset ($item['index']);
+        }
+        $this->assertEquals([
+            [
+                'token' => 'rule',
+                'key'  => '@conversion-1',
+                'value' => '5cm + 10mm',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@conversion-2',
+                'value' => '2 - 3cm - 5mm',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@incompatible-units',
+                'value' => '2 + 5px - 3cm',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@base',
+                'value' => '5%',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@filler',
+                'value' => '@base * 2',
+            ],
+            [
+                'token' => 'rule',
+                'key'  => '@other',
+                'value' => '@base + @filler',
+            ],
+        ], $result);
+    }
 }

@@ -107,6 +107,7 @@ class Tokenizer
         if ($this->lessSyntax) {
             $validTokens[] = '(';
             $validTokens[] = ')';
+            $validTokens[] = '//';
         }
 
         $tokens = $this->_findTokens($validTokens);
